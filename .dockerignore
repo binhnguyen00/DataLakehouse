@@ -1,0 +1,12 @@
+# Ignore MinIO data
+docker/minio/data/
+
+# Ignore local environment files
+.env
+
+# Ignore git metadata
+.git/
+
+# Ignore python environment
+venv/
+__pycache__/

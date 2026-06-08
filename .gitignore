@@ -4,6 +4,9 @@
 # MinIO AIStor license file
 docker/minio/minio.license
 
+# MinIO data
+docker/minio/data/
+
 # macOS
 .DS_Store
 

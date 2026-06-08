@@ -21,7 +21,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
-      - minio-data:/mnt/data
+      - ./docker/minio/data:/mnt/data
       - ./docker/minio/minio.license:/minio.license:ro
     command: server /mnt/data --console-address ":9001" --license /minio.license
     healthcheck:
@@ -76,10 +76,6 @@ services:
     restart: unless-stopped
     networks:
       - lakehouse
-
-volumes:
-  minio-data:
-    driver: local
 
 networks:
   lakehouse:
