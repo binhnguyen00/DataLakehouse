@@ -15,8 +15,8 @@ services:
     image: quay.io/minio/aistor/minio:latest
     container_name: storage-layer
     ports:
-      - "9000:9000"   # S3-compatible API
-      - "9001:9001"   # Web console
+      - "${STORAGE_SERVER_IP}:9000:9000"
+      - "${STORAGE_SERVER_IP}:9001:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -39,7 +39,7 @@ services:
     image: ghcr.io/projectnessie/nessie:0.107.5
     container_name: metadata-layer
     ports:
-      - "19120:19120"
+      - "${STORAGE_SERVER_IP}:19120:19120"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:19120/api/v2/config"]
       interval: 10s
@@ -55,7 +55,7 @@ services:
     image: trinodb/trino:latest
     container_name: api-layer
     ports:
-      - "8080:8080"
+      - "${STORAGE_SERVER_IP}:8080:8080"
     environment:
       # Passed through so Trino's ${ENV:...} substitution in catalog properties can read them
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
