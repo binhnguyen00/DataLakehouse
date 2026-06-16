@@ -21,10 +21,11 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    volumes:
-      - ./docker/minio/data:/mnt/data
-      - ./docker/minio/minio.license:/minio.license:ro
-    command: server /mnt/data --console-address ":9001" --license /minio.license
+    # volumes:
+    #   - ./docker/minio/data:/mnt/data
+    #   - ./docker/minio/minio.license:/minio.license:ro
+    # command: server /mnt/data --console-address ":9001" --license /minio.license
+    command: server /mnt/data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
