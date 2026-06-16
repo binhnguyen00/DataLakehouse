@@ -12,7 +12,8 @@ services:
 
   # Storage Layer
   minio:
-    image: quay.io/minio/aistor/minio:latest
+    # image: quay.io/minio/aistor/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: storage-layer
     ports:
       - "${STORAGE_SERVER_IP}:9000:9000"
