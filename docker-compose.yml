@@ -63,7 +63,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
-      - ./docker/trino/catalog/minio.properties:/etc/trino/catalog/minio.properties:ro
+      - ./docker/trino/catalog/lakehouse.properties:/etc/trino/catalog/lakehouse.properties:ro
     depends_on:
       minio:
         condition: service_healthy
