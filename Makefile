@@ -14,4 +14,4 @@ stop:
 	bash scripts/stop.sh
 
 test:
-	$(PYTHON) -m unittest discover -s tests -p 'test_*.py' -v
+	$(PYTHON) -m tests
