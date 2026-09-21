@@ -17,6 +17,8 @@ services:
       - "9333:9333"
       - "8888:8888"
     command: server -s3 -dir=/data
+    volumes:
+      - ./docker/warehouse:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9333/cluster/status"]
       interval: 10s
@@ -29,7 +31,7 @@ services:
 
   # metadata layer
   nessie:
-    image: ghcr.io/projectnessie/nessie:0.107.5
+    image: ghcr.io/projectnessie/nessie:latest
     container_name: metadata-layer
     ports:
       - "19120:19120"
@@ -50,7 +52,6 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Passed through so Trino's ${ENV:...} substitution in catalog properties can read them
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
     volumes:
