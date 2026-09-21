@@ -3,6 +3,16 @@
 Created time: 28 April 2026 13:46
 Month: 4. APRIL
 
+## Start the local stack
+
+Run these commands from this repository's directory:
+
+1. Start Docker Desktop and wait until Docker is ready.
+2. If Airbyte has never been installed on this machine, run `make airbyte-install` once.
+3. On each subsequent startup, run `make up`.
+
+`make up` starts SeaweedFS, Nessie, and Trino with Docker Compose, then resumes the existing Airbyte installation. **Do not run `docker compose up` first**; `make up` already does that. To run only the three Compose services, use `docker compose up -d` instead. To check their status, run `docker compose ps`; Airbyte is normally available at `http://localhost:8000`.
+
 # Concept 💡
 
 [What Is a Data Lakehouse? | IBM](https://www.ibm.com/think/topics/data-lakehouse#179371084)
@@ -33,14 +43,14 @@ This first layer collects data from a range of internal and external sources and
 curl -LsfS https://get.airbyte.com | bash -
 ```
 
-1. **Start `airbyte`** 
+1. **Install Airbyte (first-time setup only)**
 
 ```bash
-# normal
-abctl local install
+# normal (run from this repository)
+make airbyte-install
 
 # or in low-resource mode
-abctl local install --low-resource-mode
+make airbyte-install AIRBYTE_INSTALL_ARGS="--no-browser --low-resource-mode"
 ```
 
 To run Airbyte in a low-resource environment (fewer than 4 CPUs), specify the **`--low-resource-mode`** flag to the local install command. In low-resource mode, you are **unable** to access the Connector Builder.
@@ -77,11 +87,13 @@ Trino → SeaweedFS (Iceberg data and metadata files)
 DBeaver / Superset → Trino (SQL)
 ```
 
-Airbyte and Superset run separately; Compose starts SeaweedFS, Nessie, and Trino.
+`make up` starts SeaweedFS, Nessie, and Trino through Compose and resumes the existing Airbyte Kind containers. Superset still runs separately.
+
+Airbyte uses Kubernetes inside Docker, managed by `abctl`; its [Docker Compose deployment is deprecated](https://github.com/airbytehq/airbyte/discussions/40599). Routine startup does not reinstall or upgrade Airbyte. Use `make airbyte-install` only for initial setup or an intentional upgrade: [`abctl local install`](https://github.com/airbytehq/abctl#install) updates existing installations and defaults to the latest chart. To select a chart version, pass `AIRBYTE_INSTALL_ARGS="--no-browser --chart-version <version>"` and retain any custom `--values` settings.
 
 ## 1. Configure and start the stack
 
-Prerequisites: Docker with Docker Compose, plus the AWS CLI for the bucket setup below. Run these commands from the repository root.
+Prerequisites: running Docker with Docker Compose (supporting `up --wait`), Make, Bash, `abctl`, an existing Airbyte installation, plus the AWS CLI for the bucket setup below. Run these commands from the repository root.
 
 ```bash
 # First-time setup; keep an existing .env if already configured.
@@ -91,10 +103,14 @@ cp .env.example .env
 Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env`. Compose passes these values to Trino. The current SeaweedFS service has no S3 authentication configuration mounted, so setting these variables alone does not configure server-side access control.
 
 ```bash
-mkdir -p docker/warehouse/data
-docker compose up -d
-docker compose ps
+make up
 ```
+
+The command checks prerequisites and the existing Airbyte cluster before starting services. It waits up to 180 seconds for Compose services to become healthy, starts stopped Airbyte nodes, and prints `abctl local status`. Already-running Airbyte nodes are left running; Kubernetes workloads may need additional time before the UI is ready (default: `http://localhost:8000`).
+
+The default Kind cluster label is `airbyte-abctl`. For a custom cluster, use `AIRBYTE_CLUSTER_NAME=<name> make up`. If no matching container exists, check your Docker context or run the first-time installation above. Startup failures do not roll back services that already started; resolve the reported error and rerun `make up`.
+
+To start only the lakehouse services, use `docker compose up -d`.
 
 SeaweedFS runs `server -s3 -dir=/data` and persists its data in `./docker/warehouse/data`. Trino starts after the SeaweedFS and Nessie health checks pass.
 
@@ -127,11 +143,15 @@ Skip `s3 mb` if the bucket already exists.
 ## 3. Inspect or stop the stack
 
 ```bash
+docker compose ps
+abctl local status
 docker compose logs --tail=100 seaweedfs nessie trino
-docker compose down
+
+# Stop the lakehouse services and Airbyte containers; restart with make start.
+make stop
 ```
 
-Stopping the stack preserves the SeaweedFS bind-mounted files in `docker/warehouse/data`; `docker compose down -v` does not remove those files either. Nessie has no persistent backend configured in this Compose file, so catalog state is not preserved when its container is recreated, even if the object files remain.
+`make stop` keeps the Compose containers and SeaweedFS files in `docker/warehouse/data` for `make start`. Nessie has no persistent backend configured in this Compose file, so recreating its container loses catalog state even if the object files remain.
 
 # III. Ingestion → Storage
 
