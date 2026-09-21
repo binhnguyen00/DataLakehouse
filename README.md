@@ -66,172 +66,151 @@ Client-Secret: m2UjnDO4iyBQ3IsRiy5GG3LaZWP6xs9I # <- store this
     ```
     
 
-# II. **Storage layer**
+# II. Storage layer and local stack
 
-**Minio**
+[SeaweedFS](https://github.com/seaweedfs/seaweedfs) provides S3-compatible object storage. The local stack runs through [docker-compose.yml](docker-compose.yml):
 
-[https://github.com/minio/minio](https://github.com/minio/minio)
-
-**Minio** alternative
-
-[https://github.com/seaweedfs/seaweedfs](https://github.com/seaweedfs/seaweedfs)
-
-<aside>
-💡
-
-**MinIO Note**
-
-THIS REPOSITORY IS NO LONGER MAINTAINED.
-
-**Alternatives:**
-
-- [**AIStor Free**](https://min.io/download) — Full-featured, standalone edition for community use (free license)
-- [**AIStor Enterprise**](https://min.io/pricing) — Distributed edition with commercial support
-</aside>
-
-1. **Docker pull minio**
-
-```bash
-docker pull quay.io/minio/aistor/minio
+```text
+Airbyte → SeaweedFS (ingested files)
+Trino → Nessie (Iceberg catalog)
+Trino → SeaweedFS (Iceberg data and metadata files)
+DBeaver / Superset → Trino (SQL)
 ```
 
-1. **Create the directory structure**
+Airbyte and Superset run separately; Compose starts SeaweedFS, Nessie, and Trino.
 
-Create directories for data and certificates. The following example uses **`$HOME/minio`** as the base path.
+## 1. Configure and start the stack
 
-```bash
-mkdir -p $HOME/minio/data $HOME/minio/certs
-```
-
-1. **Retrieve your license file**
-
-MinIO AIStor requires a license to run
-
-Download the license file to **`$HOME/minio/minio.license`** for use in later steps.
-
-![29-04-29@03.47.07.png](Data%20Lakehouse%20Implementation/29-04-2903.47.07.png)
-
-- **`$HOME/minio/data`** to **`/mnt/data`** for object storage
-- **`$HOME/minio/minio.license`** to **`/minio.license`** for the license file
-- **`$HOME/minio/certs`** to **`/etc/minio/certs`** for TLS certificates (if configured)
-1. **Run AIStor Server**
+Prerequisites: Docker with Docker Compose, plus the AWS CLI for the bucket setup below. Run these commands from the repository root.
 
 ```bash
-docker run -dt                                             \
-  -p 9000:9000 -p 9001:9001                                \
-  -v $HOME/minio/data:/mnt/data                            \
-  -v $HOME/minio/minio.license:/minio.license              \
-  -v $HOME/minio/certs:/etc/minio/certs                    \
-  --name "mobifone-aistor-server"                          \
-  quay.io/minio/aistor/minio:latest minio server /mnt/data \
-  --license /minio.license
+# First-time setup; keep an existing .env if already configured.
+cp .env.example .env
 ```
+
+Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env`. Compose passes these values to Trino. The current SeaweedFS service has no S3 authentication configuration mounted, so setting these variables alone does not configure server-side access control.
 
 ```bash
-docker logs mobifone-aistor-server
+mkdir -p docker/warehouse/data
+docker compose up -d
+docker compose ps
 ```
 
-The output of the `logs` command includes the startup message from the AIStor Server. To access the server, use the `localhost` or `127.0.0.1` address on your local host machine.
+SeaweedFS runs `server -s3 -dir=/data` and persists its data in `./docker/warehouse/data`. Trino starts after the SeaweedFS and Nessie health checks pass.
 
-1. **Install AIStor client**
+| Service | Host endpoint | Endpoint inside the Compose network |
+| --- | --- | --- |
+| SeaweedFS S3 API | `http://localhost:8333` | `http://seaweedfs:8333` |
+| SeaweedFS master | `http://localhost:9333` | `http://seaweedfs:9333` |
+| SeaweedFS filer | `http://localhost:8888` | `http://seaweedfs:8888` |
+| Nessie API | `http://localhost:19120/api/v2` | `http://nessie:19120/api/v2` |
+| Trino | `http://localhost:8080` | `http://trino:8080` |
+
+## 2. Create the warehouse bucket
+
+Trino uses `s3://catalog/` as its warehouse. Compose does not create the bucket automatically. Once SeaweedFS is ready, create it using the AWS CLI:
 
 ```bash
-# ARM
-curl --progress-bar -L https://dl.min.io/aistor/mc/release/linux-arm64/mc -o mc
-chmod +x ./mc
-sudo mv ./mc /usr/local/bin
+set -a
+. ./.env
+set +a
+export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
+export AWS_DEFAULT_REGION=us-east-1
 
-# AMD
-curl --progress-bar -L https://dl.min.io/aistor/mc/release/linux-amd64/mc -o mc
-chmod +x ./mc
-sudo mv ./mc /usr/local/bin/
-
-mc --version
+aws --endpoint-url http://localhost:8333 s3 mb s3://catalog
+aws --endpoint-url http://localhost:8333 s3 ls
 ```
 
-1. **Connect to the deployment**
+Skip `s3 mb` if the bucket already exists.
 
-Open your browser to [**http://localhost:9001**](http://localhost:9001/).
+## 3. Inspect or stop the stack
 
-Log in using the default **minioadmin/ minioadmin** username and password.
+```bash
+docker compose logs --tail=100 seaweedfs nessie trino
+docker compose down
+```
+
+Stopping the stack preserves the SeaweedFS bind-mounted files in `docker/warehouse/data`; `docker compose down -v` does not remove those files either. Nessie has no persistent backend configured in this Compose file, so catalog state is not preserved when its container is recreated, even if the object files remain.
 
 # III. Ingestion → Storage
 
-To push data from `source`  → `destination` , you need a access key generated from MinIO to allow Airbyte to connect.
+Configure Airbyte's S3 destination to use SeaweedFS:
 
-*For example:*
-
-| Access Key | ySa03lPsEWmzI0tseeeg |
+| Setting | Value |
 | --- | --- |
-| Secret Key | yuu1Ps3gDjfBRCCcmuv0act22Jw5ulhF4RvL0r0Q |
+| S3 endpoint | `http://<reachable-host>:8333` |
+| Bucket | `catalog` |
+| Bucket path / prefix | `raw/` (keep ingested files separate from Iceberg tables) |
+| Region | `us-east-1` |
+| Access key ID | The `S3_ACCESS_KEY` value in `.env` |
+| Secret access key | The `S3_SECRET_KEY` value in `.env` |
+| Path-style access | Enable if exposed by the connector |
+
+Use an address reachable from the Airbyte connector runtime. Airbyte installed with `abctl` runs separately from the Compose network: `localhost` points to the connector itself, and the Compose service name `seaweedfs` is not automatically resolvable there. Use the Docker host's reachable IP or a host gateway name supported by your environment.
+
+Writing files through an S3 destination does not automatically register Iceberg tables in Nessie. An Iceberg-aware ingestion or transformation step must create the tables before Trino can query them through the `lakehouse` catalog.
 
 # IV. Metadata layer
 
-[Project Nessie: Transactional Catalog for Data Lakes with Git-like semantics](https://projectnessie.org/)
+[Project Nessie](https://projectnessie.org/) tracks the Iceberg catalog. Compose starts the `nessie` service and exposes port `19120`; no separate `docker run` is needed.
 
-**Implementation via docker**
-
-```bash
-docker pull ghcr.io/projectnessie/nessie:0.107.5
-
-docker run -p 19120:19120 -p 9000:9000 ghcr.io/projectnessie/nessie:0.107.5
-
-# should change port to 9002:9000. MinIO is using port 9000.
-```
-
-**Results**
-
-![04-05-04@02.23.44.png](Data%20Lakehouse%20Implementation/04-05-0402.23.44.png)
-
-![04-05-04@02.23.32.png](Data%20Lakehouse%20Implementation/04-05-0402.23.32.png)
-
-![04-05-04@02.23.20.png](Data%20Lakehouse%20Implementation/04-05-0402.23.20.png)
+Trino connects to `http://nessie:19120/api/v2` and uses the `main` reference. Nessie tracks catalog entries; Iceberg data and metadata files live in SeaweedFS.
 
 # API layer
 
-[Trino in a Docker container — Trino 480 Documentation](https://trino.io/docs/current/installation/containers.html)
+Trino exposes the Iceberg catalog as `lakehouse`. Compose mounts [docker/trino/catalog/lakehouse.properties](docker/trino/catalog/lakehouse.properties) into `/etc/trino/catalog/lakehouse.properties`:
 
-**Implementation via docker**
-
-```bash
-docker run --name trino -d -p 8080:8080 trinodb/trino
-```
-
-Create a **`minio.properties`** 
-
-```prolog
+```properties
 connector.name=iceberg
 
 iceberg.catalog.type=nessie
-iceberg.nessie-catalog.uri=http://host.docker.internal:19120/api/v2
+iceberg.nessie-catalog.uri=http://nessie:19120/api/v2
 iceberg.nessie-catalog.ref=main
 iceberg.nessie-catalog.default-warehouse-dir=s3://catalog/
 
-fs.native-s3.enabled=true
+fs.s3.enabled=true
 s3.region=us-east-1
-s3.endpoint=http://host.docker.internal:9000
-s3.aws-access-key=minio-access-key
-s3.aws-secret-key=minio-secret-key
+s3.endpoint=http://seaweedfs:8333
+s3.aws-access-key=${ENV:S3_ACCESS_KEY}
+s3.aws-secret-key=${ENV:S3_SECRET_KEY}
 s3.path-style-access=true
 ```
 
-Copy **`minio.properties`** to docker env. This helps `trino` connect to your minio server
+After editing the catalog file, restart Trino:
 
 ```bash
-docker cp path/to/minio.properties trino:/etc/trino/catalog/minio.properties
+docker compose restart trino
 ```
 
-Now you can start the container. After that:
+After changing credentials in `.env`, recreate Trino to load the new environment:
 
-1. Connect to trino using **`dbeaver`**
+```bash
+docker compose up -d --force-recreate trino
+```
 
-![04-05-04@06.59.10.png](Data%20Lakehouse%20Implementation/04-05-0406.59.10.png)
+## Verify the flow
 
-1. Connection success, you can query as usual
+Check the catalog, then open the Trino CLI:
 
-![04-05-04@07.00.06.png](Data%20Lakehouse%20Implementation/04-05-0407.00.06.png)
+```bash
+docker compose exec trino trino --execute "SHOW CATALOGS"
+docker compose exec trino trino --catalog lakehouse
+```
 
-# V. Consumtion layer
+Run this SQL to exercise catalog creation, object writes, and reads:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS lakehouse.demo;
+CREATE TABLE lakehouse.demo.storage_check (id INTEGER, message VARCHAR);
+INSERT INTO lakehouse.demo.storage_check VALUES (1, 'Hello SeaweedFS');
+SELECT * FROM lakehouse.demo.storage_check;
+DROP TABLE lakehouse.demo.storage_check;
+```
+
+In DBeaver, choose the Trino driver and connect to host `localhost`, port `8080`, catalog `lakehouse`, and user `tester`. Use schema `demo` after running the example above. The current stack does not configure Trino authentication.
+
+# V. Consumption layer
 
 [Quickstart | Superset](https://superset.apache.org/user-docs/quickstart)
 

@@ -40,8 +40,9 @@ class TestTimeTravel(unittest.TestCase):
     self.cur.fetchall()
 
     # Fetch snapshot 1 ID
+    catalog, schema, table = self.table_name.split(".")
     self.cur.execute(
-        f'SELECT snapshot_id FROM "{self.table_name}$snapshots" ORDER BY'
+        f'SELECT snapshot_id FROM {catalog}.{schema}."{table}$snapshots" ORDER BY'
         " committed_at ASC"
     )
     snapshots = [row[0] for row in self.cur.fetchall()]

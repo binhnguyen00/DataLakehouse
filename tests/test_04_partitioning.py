@@ -60,7 +60,8 @@ class TestPartitioning(unittest.TestCase):
     self.assertEqual(count_day1, 2)
 
     # 4. Check Iceberg partition metadata table
-    self.cur.execute(f"SELECT * FROM {self.table_name}$partitions")
+    catalog, schema, table = self.table_name.split(".")
+    self.cur.execute(f'SELECT * FROM {catalog}.{schema}."{table}$partitions"')
     partitions = self.cur.fetchall()
     self.assertEqual(len(partitions), 3)
 

@@ -1,11 +1,9 @@
 # Environment variables (contains secrets)
 .env
 
-# MinIO AIStor license file
-docker/minio/minio.license
-
-# MinIO data
-docker/minio/data/
+# SeaweedFS warehouse data
+docker/warehouse/data/*
+!docker/warehouse/data/.keep
 
 # macOS
 .DS_Store

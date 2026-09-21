@@ -57,8 +57,8 @@ class TestSchemaEvolution(unittest.TestCase):
         f"SELECT id, username, email FROM {self.table_name} ORDER BY id ASC"
     )
     rows = self.cur.fetchall()
-    self.assertEqual(rows[0], (1, "john_doe", None))
-    self.assertEqual(rows[1], (2, "jane_doe", "jane@example.com"))
+    self.assertEqual(rows[0], [1, "john_doe", None])
+    self.assertEqual(rows[1], [2, "jane_doe", "jane@example.com"])
 
 
 if __name__ == "__main__":
