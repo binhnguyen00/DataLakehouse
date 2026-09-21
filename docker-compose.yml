@@ -1,7 +1,5 @@
 # Prerequisites:
-#   1. Copy .env.example to .env and set your MinIO credentials
-#   2. Place your MinIO AIStor license at ./docker/minio/minio.license
-#
+#   Copy .env.example to .env and set your credentials
 # Usage:
 #   docker compose up -d        # start all services
 #   docker compose ps           # check health status
@@ -10,24 +8,17 @@
 
 services:
 
-  # Storage Layer
-  minio:
-    # image: quay.io/minio/aistor/minio:latest
-    image: quay.io/minio/minio:latest
+  # storage layer
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
     container_name: storage-layer
     ports:
-      - "${STORAGE_SERVER_IP}:9000:9000"
-      - "${STORAGE_SERVER_IP}:9001:9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    # volumes:
-    #   - ./docker/minio/data:/mnt/data
-    #   - ./docker/minio/minio.license:/minio.license:ro
-    # command: server /mnt/data --console-address ":9001" --license /minio.license
-    command: server /mnt/data --console-address ":9001"
+      - "8333:8333"
+      - "9333:9333"
+      - "8888:8888"
+    command: server -s3 -dir=/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:9333/cluster/status"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -36,12 +27,12 @@ services:
     networks:
       - lakehouse
 
-  # Metadata Layer
+  # metadata layer
   nessie:
     image: ghcr.io/projectnessie/nessie:0.107.5
     container_name: metadata-layer
     ports:
-      - "${STORAGE_SERVER_IP}:19120:19120"
+      - "19120:19120"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:19120/api/v2/config"]
       interval: 10s
@@ -52,20 +43,20 @@ services:
     networks:
       - lakehouse
 
-  # API Layer
+  # API layer
   trino:
     image: trinodb/trino:latest
     container_name: api-layer
     ports:
-      - "${STORAGE_SERVER_IP}:8080:8080"
+      - "8080:8080"
     environment:
       # Passed through so Trino's ${ENV:...} substitution in catalog properties can read them
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
     volumes:
       - ./docker/trino/catalog/lakehouse.properties:/etc/trino/catalog/lakehouse.properties:ro
     depends_on:
-      minio:
+      seaweedfs:
         condition: service_healthy
       nessie:
         condition: service_healthy
