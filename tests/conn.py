@@ -3,12 +3,11 @@ import trino
 
 
 class Helper:
-  def __init__(self):
-    DEFAULT_CATALOG   = os.getenv("TRINO_CATALOG", "lakehouse")
-    DEFAULT_SCHEMA    = os.getenv("TRINO_SCHEMA", "default")
-    DEFAULT_HOST      = os.getenv("TRINO_HOST", "localhost")
-    DEFAULT_PORT      = int(os.getenv("TRINO_PORT", "8080"))
-    DEFAULT_USER      = os.getenv("TRINO_USER", "tester")
+  DEFAULT_CATALOG = os.getenv("TRINO_CATALOG", "lakehouse")
+  DEFAULT_SCHEMA = os.getenv("TRINO_SCHEMA", "default")
+  DEFAULT_HOST = os.getenv("TRINO_HOST", "localhost")
+  DEFAULT_PORT = int(os.getenv("TRINO_PORT", "8080"))
+  DEFAULT_USER = os.getenv("TRINO_USER", "tester")
 
   @classmethod
   def get_connection(
@@ -19,23 +18,12 @@ class Helper:
     catalog: str = None,
     schema: str = None,
   ) -> trino.dbapi.Connection:
-    if host is None:
-      host = os.getenv("TRINO_HOST", "localhost")
-    if port is None:
-      port = int(os.getenv("TRINO_PORT", "8080"))
-    if user is None:
-      user = os.getenv("TRINO_USER", "tester")
-    if catalog is None:
-      catalog = os.getenv("TRINO_CATALOG", "lakehouse")
-    if schema is None:
-      schema = os.getenv("TRINO_SCHEMA", "default")
-
     return trino.dbapi.connect(
-      host=host,
-      port=port,
-      user=user,
-      catalog=catalog,
-      schema=schema,
+      host=host if host is not None else cls.DEFAULT_HOST,
+      port=port if port is not None else cls.DEFAULT_PORT,
+      user=user if user is not None else cls.DEFAULT_USER,
+      catalog=catalog if catalog is not None else cls.DEFAULT_CATALOG,
+      schema=schema if schema is not None else cls.DEFAULT_SCHEMA,
     )
 
   @classmethod
