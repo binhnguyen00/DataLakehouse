@@ -70,11 +70,11 @@ Client-Secret: m2UjnDO4iyBQ3IsRiy5GG3LaZWP6xs9I # <- store this
 
 - Return to your browser and use that password to log into Airbyte.
 - Optional: Since you probably want to set your own password, you can change it any time.
-    
+
     ```bash
     abctl local credentials --password <YourStrongPasswordExample>
     ```
-    
+
 
 # II. Storage layer and local stack
 
@@ -124,7 +124,7 @@ SeaweedFS runs `server -s3 -dir=/data` and persists its data in `./docker/wareho
 
 ## 2. Create the warehouse bucket
 
-Trino uses `s3://catalog/` as its warehouse. Compose does not create the bucket automatically. Once SeaweedFS is ready, create it using the AWS CLI:
+Trino uses `s3://catalog/` as its fallback warehouse. This bucket is for tables created directly through Trino and is not used by Airbyte destinations. Compose does not create the bucket automatically. Once SeaweedFS is ready, create it using the AWS CLI:
 
 ```bash
 set -a
@@ -155,21 +155,41 @@ make stop
 
 # III. Ingestion → Storage
 
-Configure Airbyte's S3 destination to use SeaweedFS:
+Create one Airbyte **S3 Data Lake** destination for each source database. Use the normalized database name as both the SeaweedFS bucket and Nessie namespace:
 
 | Setting | Value |
 | --- | --- |
-| S3 endpoint | `http://<reachable-host>:8333` |
-| Bucket | `catalog` |
-| Bucket path / prefix | `raw/` (keep ingested files separate from Iceberg tables) |
-| Region | `us-east-1` |
-| Access key ID | The `S3_ACCESS_KEY` value in `.env` |
-| Secret access key | The `S3_SECRET_KEY` value in `.env` |
-| Path-style access | Enable if exposed by the connector |
+| S3 endpoint | `http://host.docker.internal:8333` |
+| S3 bucket name | `<dbname>` |
+| Warehouse location | `s3://<dbname>` |
+| S3 bucket region | `us-east-1` |
+| AWS access key ID | The `S3_ACCESS_KEY` value in `.env` |
+| AWS secret access key | The `S3_SECRET_KEY` value in `.env` |
+| Catalog type | `Nessie` |
+| Nessie server URI | `http://host.docker.internal:19120/api/v2` |
+| Default namespace (Nessie) | `<dbname>` |
+| Main branch name | `main` |
+| Normalize column names | Enabled |
 
-Use an address reachable from the Airbyte connector runtime. Airbyte installed with `abctl` runs separately from the Compose network: `localhost` points to the connector itself, and the Compose service name `seaweedfs` is not automatically resolvable there. Use the Docker host's reachable IP or a host gateway name supported by your environment.
+Airbyte installed with `abctl` runs in a Kind cluster outside the Compose network. From connector workloads, `localhost` points to the workload itself and the Compose service names are not automatically resolvable. On Docker Desktop, use `host.docker.internal` to reach SeaweedFS and Nessie on the host.
 
-Writing files through an S3 destination does not automatically register Iceberg tables in Nessie. An Iceberg-aware ingestion or transformation step must create the tables before Trino can query them through the `lakehouse` catalog.
+Before creating the destination, create its bucket:
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 mb s3://<dbname>
+```
+
+Use lowercase letters and numbers for `<dbname>`, starting with a letter. This keeps the same name valid for both S3 and Nessie. Examples:
+
+| Source database | Bucket | Warehouse | SeaweedFS logical root |
+| --- | --- | --- | --- |
+| `dummyjson` | `dummyjson` | `s3://dummyjson` | `/buckets/dummyjson` |
+| `customer` | `customer` | `s3://customer` | `/buckets/customer` |
+| `invoice` | `invoice` | `s3://invoice` | `/buckets/invoice` |
+
+Each Airbyte connection must use the destination created for its source database. The connection name does not determine the bucket. Iceberg creates and manages table-specific data and metadata paths inside the bucket. See [AIRBYTE.md](AIRBYTE.md) for the concise rules.
+
+S3 Data Lake writes Iceberg tables and registers them in Nessie, so Trino can query them through the `lakehouse` catalog after a successful sync.
 
 # IV. Metadata layer
 
@@ -234,34 +254,41 @@ In DBeaver, choose the Trino driver and connect to host `localhost`, port `8080`
 
 [Quickstart | Superset](https://superset.apache.org/user-docs/quickstart)
 
-**1. Get Superset**
+Superset is part of this repository's Compose stack and is available at
+`http://localhost:8088`. Its custom image installs the Trino Python driver from
+[`docker/superset/Dockerfile`](docker/superset/Dockerfile).
+
+After changing the Superset Dockerfile, rebuild and recreate its services:
 
 ```bash
-git clone https://github.com/apache/superset
+docker compose up -d --build --force-recreate superset-init superset
 ```
 
-**2. Start the latest official release of Superset**
+Log in with username `admin` and the `SUPERSET_ADMIN_PASSWORD` value from
+`.env`.
 
-```bash
-# Enter the repository you just cloned
-$ cd superset
+## Connect Superset to Trino
 
-# Set the repo to the state associated with the latest official version
-$ git checkout tags/6.0.0
+In Superset, open **Settings → Data: Database Connections → + Database** and
+create a connection named `Lakehouse` with this SQLAlchemy URI:
 
-# Fire up Superset using Docker Compose
-$ docker compose -f docker-compose-image-tag.yml up
+```text
+trino://tester@trino:8080/lakehouse/default
 ```
 
-This may take a moment as Docker Compose will fetch the underlying container images and will load up some examples. Once all containers are downloaded and the output settles, you're ready to log in.
+Use the Compose service name `trino`, not `localhost`, because Superset connects
+from its container. The current Trino service has no authentication, so the
+username identifies the query user and no password is required.
 
-⚠️ If you get an error message like `validating superset\docker-compose-image-tag.yml: services.superset-worker-beat.env_file.0 must be a string`, you need to update your version of `docker-compose`. Note that `docker-compose` is on the path to deprecation and you should now use `docker compose` instead.
+Select **Test Connection**, then **Connect**. To use the Airbyte data, open
+**Data → Datasets → + Dataset** and select:
 
-#### **3. Log into Superset**
+- Database: `Lakehouse`
+- Schema: `default`
+- Table: `users`
 
-Now head over to [http://localhost:8088](http://localhost:8088/) and log in with the default created account:
+Verify it in SQL Lab:
 
-```bash
-username: admin
-password: admin
+```sql
+SELECT count(*) FROM lakehouse.default.users;
 ```
