@@ -13,10 +13,10 @@ the same value can be used safely as both the S3 bucket and Nessie namespace.
 Configure each destination as follows:
 
 ```text
-S3 bucket name:     <dbname>
-Warehouse location: s3://<dbname>
-Nessie namespace:   <dbname>
-Nessie branch:      main
+S3 bucket name        : <dbname>
+Warehouse location    : s3://<dbname>
+Nessie namespace      : <dbname>
+Nessie branch         : main
 ```
 
 Examples:
