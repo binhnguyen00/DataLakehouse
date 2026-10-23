@@ -1,2 +1,9 @@
 trino
 dbt-trino
+pandas
+prophet
+matplotlib
+scikit-learn
+statsmodels
+python-dotenv
+pyarrow
